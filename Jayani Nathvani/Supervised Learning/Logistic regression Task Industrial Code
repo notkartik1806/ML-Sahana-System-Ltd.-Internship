@@ -80,3 +80,4 @@ model, X_test, y_test = model_train.train_model(X, y)
 
 check = ModelValidation()
 check.validate_model(model, X_test, y_test)
+
