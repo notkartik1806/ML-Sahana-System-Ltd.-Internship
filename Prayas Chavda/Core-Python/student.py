@@ -37,14 +37,14 @@ class StudentManager:
         for student in self.students:
             print(f"\nEnter marks for {student.name}:")
             for j in range(sub_count):
-                subject = input(f"Enter subject name {j+1}: ")
-                marks = int(input(f"Enter marks for {subject}: "))
+                subject = input(f"\nEnter subject name {j+1}: ")
+                marks = int(input(f"\nEnter marks for {subject}: "))
                 student.add_subject_marks(subject, marks)
     
     def write_data(self, filename="Student_info.txt"):
         with open(filename, "w") as file:
             for i, student in enumerate(self.students, 1):
-                file.write(f"Student {i}:\n")
+                file.write(f"\nStudent {i}:\n")
                 for key, value in student.get_student_dict().items():
                     file.write(f"{key}: {value}\n")
     
