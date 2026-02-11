@@ -1,0 +1,102 @@
+# Student Management System
+
+A simple console-based Student Management System built with Python for managing student records efficiently.
+
+## Features
+
+- **Add Student** - Add a single student with name, age, and marks
+- **Bulk Add Students** - Add multiple students at once
+  - Manual entry mode
+  - Import from CSV file
+- **View Students** - Display all student records
+- **Search Student** - Find a student by name
+- **Delete Student** - Remove a student record
+
+## Requirements
+
+- Python 3.x
+
+## Usage
+
+Run the program:
+```bash
+python main.py
+```
+
+### Menu Options
+
+1. **Add a student** - Enter details for one student
+2. **Bulk add students** - Choose between:
+   - Manual entry: Specify count and enter details for multiple students
+   - File import: Import from a CSV file
+3. **View student list** - Display all students
+4. **Search for a student** - Search by student name
+5. **Delete a student** - Remove a student by name
+6. **Exit** - Close the application
+
+## File Structure
+
+```
+Core-Python/
+├── main.py              # Main program with menu interface
+├── student.py           # Student classes (Add, View, Search, Delete, BulkAdd)
+├── data.txt             # Student data storage
+└── sample_students.csv  # Sample CSV file for bulk import
+```
+
+## CSV Format for Bulk Import
+
+Create a CSV file with the following format (no headers):
+```
+Name,Age,Marks
+Rahul Sharma,19,85
+Priya Patel,20,92
+```
+
+## Example
+
+```
+========================================
+   STUDENT MANAGEMENT SYSTEM
+========================================
+1. Add a student
+2. Bulk add students
+3. View student list
+4. Search for a student
+5. Delete a student
+6. Exit
+========================================
+Enter your choice (1-6): 2
+
+--- Bulk Add Students ---
+Choose an option:
+1. Add multiple students manually
+2. Import from file (CSV format)
+Enter your choice (1-2): 2
+
+Enter the filename (e.g., students.csv): sample_students.csv
+
+Successfully added 6 student(s)!
+```
+
+## Functions Overview
+
+| Class | Purpose |
+|-------|---------|
+| `AddStudent` | Add a single student record |
+| `BulkAddStudent` | Add multiple students (manual or file import) |
+| `ViewStudent` | Display all student records |
+| `SearchStudent` | Search for a specific student |
+| `DeleteStudent` | Remove a student record |
+
+## Data Storage
+
+Student data is stored in `data.txt` in CSV format:
+```
+Name,Age,Marks
+```
+
+---
+
+**Author**: Prayas Chavda  
+**Year**: 2026
