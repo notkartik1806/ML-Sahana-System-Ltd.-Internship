@@ -5,6 +5,7 @@ import pandas as pd
 import joblib
 import matplotlib.pyplot as plt
 import seaborn as sns
+import os
 
 from sklearn.datasets import load_iris
 from sklearn.model_selection import train_test_split
@@ -21,7 +22,7 @@ TEST_SIZE = 0.2
 VALIDATION_SIZE = 0.1
 VARIANCE_THRESHOLD = 0.95
 
-ARTEFACT_PATH = "Unsupervised Learning/PCA/pca_transformer.pkl"
+ARTEFACT_PATH = "General/PCA/pca_transformer.pkl"
 
 STYLE = "seaborn-v0_8-darkgrid"
 DPI = 100
@@ -188,7 +189,7 @@ class PCAVisualizer:
         plt.xlabel("Principal Component")
         plt.ylabel("Explained Variance")
         plt.tight_layout()
-        plt.savefig("Unsupervised Learning/PCA/graphs/scree_plot.png")
+        plt.savefig("General/PCA/graphs/scree_plot.png")
         plt.close()
 
     # --------------------------------------------------------------------- #
@@ -201,7 +202,7 @@ class PCAVisualizer:
         plt.xlabel("Components")
         plt.ylabel("Total Variance")
         plt.tight_layout()
-        plt.savefig("Unsupervised Learning/PCA/graphs/cumulative_variance.png")
+        plt.savefig("General/PCA/graphs/cumulative_variance.png")
         plt.close()
 
     # --------------------------------------------------------------------- #
@@ -210,7 +211,7 @@ class PCAVisualizer:
         plt.bar(range(1, len(ratios) + 1), ratios)
         plt.title("Variance Contribution")
         plt.tight_layout()
-        plt.savefig("Unsupervised Learning/PCA/graphs/variance_bar.png")
+        plt.savefig("General/PCA/graphs/variance_bar.png")
         plt.close()
 
     # --------------------------------------------------------------------- #
@@ -237,7 +238,7 @@ class PCAVisualizer:
         plt.ylabel("PC2")
         plt.title("2D Projection")
         plt.tight_layout()
-        plt.savefig("Unsupervised Learning/PCA/graphs/projection_2d.png")
+        plt.savefig("General/PCA/graphs/projection_2d.png")
         plt.close()
 
     # --------------------------------------------------------------------- #
@@ -266,7 +267,7 @@ class PCAVisualizer:
 
         ax.set_title("3D Projection")
         plt.tight_layout()
-        plt.savefig("Unsupervised Learning/PCA/graphs/projection_3d.png")
+        plt.savefig("General/PCA/graphs/projection_3d.png")
         plt.close()
 
     # --------------------------------------------------------------------- #
@@ -281,7 +282,7 @@ class PCAVisualizer:
         )
         plt.title("Component Loadings")
         plt.tight_layout()
-        plt.savefig("Unsupervised Learning/PCA/graphs/loadings_heatmap.png")
+        plt.savefig("General/PCA/graphs/loadings_heatmap.png")
         plt.close()
 
     # --------------------------------------------------------------------- #
@@ -308,7 +309,7 @@ class PCAVisualizer:
         plt.ylabel("PC2")
         plt.title("Biplot")
         plt.tight_layout()
-        plt.savefig("Unsupervised Learning/PCA/graphs/biplot.png")
+        plt.savefig("General/PCA/graphs/biplot.png")
         plt.close()
 
     # --------------------------------------------------------------------- #
@@ -329,7 +330,7 @@ class PCAVisualizer:
         plt.xlabel("Components")
         plt.ylabel("MSE")
         plt.tight_layout()
-        plt.savefig("Unsupervised Learning/PCA/graphs/reconstruction_error.png")
+        plt.savefig("General/PCA/graphs/reconstruction_error.png")
         plt.close()
 
 # ============================================================================
@@ -381,6 +382,27 @@ class Pipeline:
         loaded = joblib.load(ARTEFACT_PATH)
         sample = loaded.transform(x.iloc[:5])
         print("✓ Reloaded transformer works")
+
+        # Create column names
+        pc_columns = [f"PC{i+1}" for i in range(train_reduced.shape[1])]
+
+        # Convert to DataFrame
+        train_df = pd.DataFrame(train_reduced, columns=pc_columns)
+        val_df = pd.DataFrame(val_reduced, columns=pc_columns)
+        test_df = pd.DataFrame(test_reduced, columns=pc_columns)
+
+        # Add target column back
+        train_df["species"] = y_train.values
+        val_df["species"] = y_val.values
+        test_df["species"] = y_test.values
+
+        os.makedirs("General/PCA", exist_ok=True)
+
+        train_df.to_csv("General/PCA/reduced_data/pca_train.csv", index=False)
+        val_df.to_csv("General/PCA/reduced_data/pca_val.csv", index=False)
+        test_df.to_csv("General/PCA/reduced_data/pca_test.csv", index=False)
+
+        print("✓ PCA reduced datasets saved")
 
 
 if __name__ == "__main__":
