@@ -58,13 +58,13 @@ Core-Python/
 Enter your choice (1-6): 2
 
 --- Bulk Add Students ---
-Choose an option:
-1. Add multiple students manually
-2. Import from file (CSV format)
-Enter your choice (1-2): 2
-
-Enter the filename (e.g., students.csv): sample_students.csv
-
+Add multiple students manually
+...
+...
+.
+.
+.
+...
 Successfully added 6 student(s)!
 ```
 
