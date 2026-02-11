@@ -28,7 +28,6 @@ python main.py
 1. **Add a student** - Enter details for one student
 2. **Bulk add students** - Choose between:
    - Manual entry: Specify count and enter details for multiple students
-   - File import: Import from a CSV file
 3. **View student list** - Display all students
 4. **Search for a student** - Search by student name
 5. **Delete a student** - Remove a student by name
@@ -41,16 +40,6 @@ Core-Python/
 ├── main.py              # Main program with menu interface
 ├── student.py           # Student classes (Add, View, Search, Delete, BulkAdd)
 ├── data.txt             # Student data storage
-└── sample_students.csv  # Sample CSV file for bulk import
-```
-
-## CSV Format for Bulk Import
-
-Create a CSV file with the following format (no headers):
-```
-Name,Age,Marks
-Rahul Sharma,19,85
-Priya Patel,20,92
 ```
 
 ## Example
@@ -84,7 +73,7 @@ Successfully added 6 student(s)!
 | Class | Purpose |
 |-------|---------|
 | `AddStudent` | Add a single student record |
-| `BulkAddStudent` | Add multiple students (manual or file import) |
+| `BulkAddStudent` | Add multiple students |
 | `ViewStudent` | Display all student records |
 | `SearchStudent` | Search for a specific student |
 | `DeleteStudent` | Remove a student record |
