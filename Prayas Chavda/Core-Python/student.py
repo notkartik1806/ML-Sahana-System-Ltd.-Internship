@@ -19,47 +19,43 @@ class Student:
 class StudentManager:
     def __init__(self):
         self.students = []
-        self.subjects = []
+    
+    def add_student(self, roll_no, name, subjects_marks=None):
+        student = Student(roll_no, name)
+        if subjects_marks:
+            for subject, marks in subjects_marks.items():
+                student.add_subject_marks(subject, marks)
+        self.students.append(student)
     
     def get_data(self, count):
         for i in range(count):
-            roll_no = int(input("Enter roll number: "))
-            name = input("Enter name: ")
-            student = Student(roll_no, name)
-            self.students.append(student)
-        print("\nStudents added successfully!")
+            roll_no = int(input(f"Enter roll number for student {i+1}: "))
+            name = input(f"Enter name for student {i+1}: ")
+            self.add_student(roll_no, name)
     
     def add_subjects(self, sub_count):
-        for i in range(sub_count):
-            subject = input(f"Enter Subject {i+1} name: ")
-            self.subjects.append(subject)
-        print(f"\nSubjects: {', '.join(self.subjects)}")
-        
         for student in self.students:
-            print(f"\nEnter {student.name}'s details:")
-            for subject in self.subjects:
+            print(f"\nEnter marks for {student.name}:")
+            for j in range(sub_count):
+                subject = input(f"Enter subject name {j+1}: ")
                 marks = int(input(f"Enter marks for {subject}: "))
                 student.add_subject_marks(subject, marks)
-        print("\nAll data collected!")
     
     def write_data(self, filename="Student_info.txt"):
-        file = open(filename, "w")
-        iteration = 1
-        for obj in self.students:
-            file.write(f"Student {iteration} data:\n")
-            student_dict = obj.get_student_dict()
-            for key, value in student_dict.items():
-                file.write(f"{key} : {value}\n")
-            iteration += 1
-        file.close()
-        print(f"\nData written to {filename}!")
+        with open(filename, "w") as file:
+            for i, student in enumerate(self.students, 1):
+                file.write(f"Student {i}:\n")
+                for key, value in student.get_student_dict().items():
+                    file.write(f"{key}: {value}\n")
     
     def display_all_students(self):
-        print("\n" + "="*50)
-        print("ALL STUDENT DATA")
-        print("="*50)
-        for idx, student in enumerate(self.students, 1):
-            print(f"\nStudent {idx}:")
-            student_dict = student.get_student_dict()
-            for key, value in student_dict.items():
+        for i, student in enumerate(self.students, 1):
+            print(f"\nStudent {i}:")
+            for key, value in student.get_student_dict().items():
                 print(f"  {key}: {value}")
+    
+    def save_to_file(self, filename="Student_info.txt"):
+        self.write_data(filename)
+    
+    def display_students(self):
+        self.display_all_students()
