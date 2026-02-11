@@ -1,0 +1,14 @@
+Student 1 data:
+roll_no : 1
+name : Prayas
+English : 91
+Maths : 89
+Pgysics : 56
+
+Student 2 data:
+roll_no : 2
+name : Vraj
+English : 87
+Maths : 56
+Pgysics : 98
+

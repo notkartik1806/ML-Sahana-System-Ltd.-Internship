@@ -1,6 +1,0 @@
-Prayas Chavda,20,100
-Vraj Thakkar,21,90
-Anurag Soliya,22,120
-Nisarg Chauhan,21,100
-Amit Trivedi,43,11
-Ram,6000,200
