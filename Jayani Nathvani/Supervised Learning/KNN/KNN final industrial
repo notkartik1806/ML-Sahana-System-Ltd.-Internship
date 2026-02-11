@@ -1,0 +1,192 @@
+import warnings
+import numpy as np
+import pandas as pd
+from sklearn.model_selection import train_test_split
+from sklearn.preprocessing import LabelEncoder, StandardScaler
+from sklearn.metrics import (
+    accuracy_score, precision_score,
+    recall_score, f1_score, confusion_matrix,
+    classification_report
+)
+import joblib
+
+warnings.filterwarnings("ignore")
+
+DATASET_PATH = "TShirt_size.csv"
+RANDOM_STATE = 42
+TEST_SIZE = 0.2
+VALIDATION_SIZE = 0.1
+K_NEIGHBORS = 5
+SYNTHETIC_SAMPLES_PER_CLASS = 200
+MODEL_SAVE_PATH = "knn_tshirt_model.pkl"
+
+class SyntheticDatasetGenerator:
+
+    def __init__(self, data, target_column, samples_per_class):
+        self.data = data
+        self.target_column = target_column
+        self.samples_per_class = samples_per_class
+
+    def generate(self):
+
+        synthetic_data = []
+        classes = self.data[self.target_column].unique()
+
+        for cls in classes:
+
+            class_data = self.data[self.data[self.target_column] == cls]
+            features = class_data.iloc[:, :-1]
+
+            means = features.mean()
+            stds = features.std()
+
+            synthetic_features = np.random.normal(
+                loc=means.values,
+                scale=stds.values,
+                size=(self.samples_per_class, len(means))
+            )
+
+            synthetic_df = pd.DataFrame(
+                synthetic_features,
+                columns=features.columns
+            )
+
+            synthetic_df[self.target_column] = cls
+            synthetic_data.append(synthetic_df)
+
+        final_dataset = pd.concat(synthetic_data, ignore_index=True)
+
+        print("\nSynthetic dataset created successfully!")
+        print("Total samples:", len(final_dataset))
+
+        return final_dataset
+
+
+class DatasetProcessor:
+
+    def __init__(self, data):
+        self.data = data
+
+    def process(self):
+
+        X = self.data.iloc[:, :-1]
+        y = self.data.iloc[:, -1]
+
+        print("\nTarget Classes:", y.unique())
+
+        self.label_encoder = LabelEncoder()
+        y_encoded = self.label_encoder.fit_transform(y)
+
+        scaler = StandardScaler()
+        X_scaled = scaler.fit_transform(X)
+
+        return X_scaled, y_encoded
+
+
+class KNNModel:
+
+    def __init__(self, k=5):
+        self.k = k
+
+    def fit(self, X, y):
+        self.X_train = X
+        self.y_train = y
+        print("✓ KNN stored training data")
+        return self
+
+    def _euclidean_distance(self, x1, x2):
+        return np.sqrt(np.sum((x1 - x2) ** 2))
+
+    def predict(self, X):
+
+        predictions = []
+
+        for x in X:
+            distances = [
+                self._euclidean_distance(x, x_train)
+                for x_train in self.X_train
+            ]
+
+            k_indices = np.argsort(distances)[:self.k]
+            k_labels = self.y_train[k_indices]
+
+            prediction = np.bincount(k_labels).argmax()
+            predictions.append(prediction)
+
+        return np.array(predictions)
+
+def main():
+
+    print("\nKNN PIPELINE WITH SYNTHETIC DATA")
+
+    original_data = pd.read_csv(DATASET_PATH)
+    print("\nOriginal Dataset Size:", len(original_data))
+
+    generator = SyntheticDatasetGenerator(
+        original_data,
+        target_column=original_data.columns[-1],
+        samples_per_class=SYNTHETIC_SAMPLES_PER_CLASS
+    )
+
+    synthetic_data = generator.generate()
+
+    processor = DatasetProcessor(synthetic_data)
+    X, y = processor.process()
+
+    X_temp, X_test, y_temp, y_test = train_test_split(
+        X, y,
+        test_size=TEST_SIZE,
+        random_state=RANDOM_STATE,
+        stratify=y
+    )
+
+    val_adjusted = VALIDATION_SIZE / (1 - TEST_SIZE)
+
+    X_train, X_val, y_train, y_val = train_test_split(
+        X_temp, y_temp,
+        test_size=val_adjusted,
+        random_state=RANDOM_STATE,
+        stratify=y_temp
+    )
+
+    print("\nTraining samples:", len(X_train))
+    print("Validation samples:", len(X_val))
+    print("Test samples:", len(X_test))
+
+    model = KNNModel(k=K_NEIGHBORS)
+    model.fit(X_train, y_train)
+
+    def evaluate(X_set, y_set, name):
+
+        predictions = model.predict(X_set)
+
+        print(f"\n--- {name} ---")
+        print("Accuracy:", accuracy_score(y_set, predictions))
+        print("Precision:", precision_score(y_set, predictions, average="weighted"))
+        print("Recall:", recall_score(y_set, predictions, average="weighted"))
+        print("F1 Score:", f1_score(y_set, predictions, average="weighted"))
+
+        print("\nConfusion Matrix:")
+        print(confusion_matrix(y_set, predictions))
+
+        print("\nClassification Report:")
+        print(classification_report(y_set, predictions))
+
+    evaluate(X_train, y_train, "Training Set")
+    evaluate(X_val, y_val, "Validation Set")
+    evaluate(X_test, y_test, "Test Set")
+
+    joblib.dump(model, MODEL_SAVE_PATH)
+    print("\n✓ Model saved successfully!")
+
+    loaded_model = joblib.load(MODEL_SAVE_PATH)
+    print("✓ Model loaded successfully!")
+
+    loaded_predictions = loaded_model.predict(X_test)
+    print("\nLoaded Model Test Accuracy:",
+          accuracy_score(y_test, loaded_predictions))
+
+    print("\nPIPELINE COMPLETED SUCCESSFULLY")
+
+if __name__ == "__main__":
+    main()
