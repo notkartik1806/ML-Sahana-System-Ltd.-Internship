@@ -4,7 +4,7 @@ import pandas as pd
 # IMPORTANT → this import is required for pickle to rebuild the model
 from Linear_Regression import LinearRegressionModel
 
-MODEL_SAVE_PATH = "Supervised Learning/Linear Regression/linear_regression_model.pkl"
+MODEL_SAVE_PATH = "Supervised Learning/Linear_Regression/linear_regression_model.pkl"
 
 
 def get_valid_input(prompt, valid_options=None, cast_type=str):

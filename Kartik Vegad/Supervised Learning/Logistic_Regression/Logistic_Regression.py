@@ -1,14 +1,17 @@
 import warnings
-from dataclasses import dataclass
-from typing import Tuple, Optional
-
-import joblib
-import matplotlib.pyplot as plt
 import numpy as np
 import pandas as pd
+import matplotlib.pyplot as plt
 import seaborn as sns
-from sklearn.metrics import mean_squared_error, r2_score, mean_absolute_error
 from sklearn.model_selection import train_test_split
+from sklearn.metrics import (
+    accuracy_score, precision_score, recall_score, f1_score,
+    confusion_matrix, roc_auc_score, roc_curve, classification_report
+)
+from sklearn.preprocessing import LabelEncoder
+import joblib
+from typing import Tuple, Optional
+from dataclasses import dataclass
 
 warnings.filterwarnings('ignore')
 
@@ -17,22 +20,20 @@ warnings.filterwarnings('ignore')
 # ============================================================================
 
 # Dataset Configuration
-DATASET_PATH = "Supervised Learning/Linear Regression/medical_insurance.csv"
+DATASET_PATH = "Supervised Learning/Logistic_Regression/Social_Network_Ads.csv"  
 RANDOM_STATE = 42
 TEST_SIZE = 0.2
 VALIDATION_SIZE = 0.1
-TARGET_COLUMN= "charges"
 
 # Model Hyperparameters
-LEARNING_RATE = 0.001
-NUM_ITERATIONS = 1000
+LEARNING_RATE = 0.01
+NUM_ITERATIONS = 2000
 BATCH_SIZE = 32
 CONVERGENCE_THRESHOLD = 1e-6
+GRADIENT_CLIP_VALUE = 5.0
 
 # Model Persistence
-# it's called pickle file saved at disk can be transferable and reconstructed
-# it stores any kind of python objects like numpy array machine learning models list dictionaries tuple
-MODEL_SAVE_PATH = "Supervised Learning\Linear Regression\linear_regression_model.pkl"
+MODEL_SAVE_PATH = "Supervised Learning/Logistic_Regression/logistic_regression_model.pkl"
 
 # Visualization Configuration
 FIGURE_SIZE = (12, 8)
@@ -44,20 +45,22 @@ STYLE = 'seaborn-v0_8-darkgrid'
 class ModelMetrics:
     """Data class to store model evaluation metrics."""
 
-    mse: float
-    rmse: float
-    mae: float
-    r2: float
+    accuracy: float
+    precision: float
+    recall: float
+    f1: float
+    roc_auc: float
 
     def __str__(self) -> str:
        """Return formatted string representation of metrics."""
        return (
           f"Model Performance Metrics:\n"
           f"{'=' * 50}\n"
-          f"Mean Squared Error (MSE):  {self.mse:.4f}\n"
-          f"Root Mean Squared Error (RMSE): {self.rmse:.4f}\n"
-          f"Mean Absolute Error (MAE): {self.mae:.4f}\n"
-          f"R² Score:                  {self.r2:.4f}\n"
+          f"Accuracy:   {self.accuracy:.4f}\n"
+          f"Precision:  {self.precision:.4f}\n"
+          f"Recall:     {self.recall:.4f}\n"
+          f"F1-Score:   {self.f1:.4f}\n"
+          f"ROC-AUC:    {self.roc_auc:.4f}\n"
           f"{'=' * 50}"
        )
 
@@ -66,32 +69,35 @@ class DatasetLoader:
     """Class responsible for loading and initial dataset operations."""
 
     def __init__(self, dataset_path: str):
-       """
-       Initialize the DatasetLoader.
-
-       Args:
-          dataset_path: Path or identifier for the dataset
-       """
-       self.dataset_path = dataset_path
-       self.data: Optional[pd.DataFrame] = None
-       self.target: Optional[pd.Series] = None
-       self.feature_names: Optional[list] = None
+        self.dataset_path = dataset_path
+        self.data: Optional[pd.DataFrame] = None
+        self.target: Optional[pd.Series] = None
+        self.feature_names: Optional[list] = None
 
     def load_data(self) -> Tuple[pd.DataFrame, pd.Series]:
         print(f"\n{'=' * 70}")
         print("LOADING DATASET")
         print(f"{'=' * 70}")
 
+        # Read CSV
         df = pd.read_csv(self.dataset_path)
 
-        self.data = df.drop(columns=[TARGET_COLUMN])
-        self.target = df[TARGET_COLUMN]
-        self.feature_names = list(self.data.columns)
-
-        print(f"✓ Dataset loaded successfully from: {self.dataset_path}")
+        print("✓ CSV loaded successfully")
         print(f"✓ Total samples: {df.shape[0]}")
-        print(f"✓ Number of features: {len(self.feature_names)}")
-        print(f"✓ Feature names: {', '.join(self.feature_names)}")
+
+        # Drop ID column
+        if "User ID" in df.columns:
+            df = df.drop(columns=["User ID"])
+            print("✓ Dropped User ID column")
+
+        # Separate features and target
+        self.target = df["Purchased"]
+        self.data = df.drop(columns=["Purchased"])
+
+        self.feature_names = self.data.columns.tolist()
+
+        print(f"✓ Features: {self.feature_names}")
+        print("✓ Target: Purchased (0 = No, 1 = Yes)")
 
         return self.data, self.target
 
@@ -111,7 +117,7 @@ class DatasetValidator:
        self.data = data
        self.target = target
 
-    def zverify_dataset(self) -> bool:
+    def verify_dataset(self) -> bool:
        """
        Perform comprehensive dataset verification.
 
@@ -183,83 +189,109 @@ class DatasetValidator:
        # Target statistics
        print(f"\n--- Target Statistics ---")
        print(self.target.describe())
+       print(f"\n--- Class Distribution ---")
+       class_counts = self.target.value_counts()
+       print(class_counts)
+       print(f"Class balance: {class_counts.min() / class_counts.max():.2f}")
 
        # Check for infinite values
        numeric_data = self.data.select_dtypes(include=[np.number])
        inf_count = np.isinf(numeric_data.values).sum()
-       
-       if inf_count > 0:
-            print(f"⚠ WARNING: {inf_count} infinite numeric values detected")
-            validation_passed = False
-      
-       else:
-            print("✓ No infinite numeric values detected")
 
+       if inf_count > 0:
+         print(f"⚠ WARNING: {inf_count} infinite values detected")
+         validation_passed = False
+       else:
+         print("✓ No infinite values detected")
+
+       return validation_passed
 
 
 class DatasetProcessor:
     """Class responsible for dataset processing and transformation."""
 
     def __init__(self, data: pd.DataFrame, target: pd.Series):
-       """
-       Initialize the DatasetProcessor.
+        self.data = data.copy()
+        self.target = target.copy()
+        self.processed_data: Optional[pd.DataFrame] = None
+        self.processed_target: Optional[pd.Series] = None
 
-       Args:
-          data: Features dataframe
-          target: Target series
-       """
-       self.data = data.copy()
-       self.target = target.copy()
-       self.processed_data: Optional[pd.DataFrame] = None
-       self.processed_target: Optional[pd.Series] = None
+        # NEW → store encoders for future inference
+        self.encoders = {}
 
     def process_dataset(self) -> Tuple[pd.DataFrame, pd.Series]:
-       """
-       Process the dataset: handle missing values, outliers, normalization.
+        """
+        Process the dataset: handle missing values, encoding, normalization.
 
-       Returns:
-          Tuple of (processed_features, processed_target)
-       """
-       print(f"\n{'=' * 70}")
-       print("DATASET PROCESSING")
-       print(f"{'=' * 70}")
+        Returns:
+            Tuple of (processed_features, processed_target)
+        """
+        print(f"\n{'=' * 70}")
+        print("DATASET PROCESSING")
+        print(f"{'=' * 70}")
 
-       # Handle missing values
-       print("\n--- Handling Missing Values ---")
-       missing_before = self.data.isnull().sum().sum()
-       numeric_cols = self.data.select_dtypes(include=[np.number]).columns
-       self.data[numeric_cols] = self.data[numeric_cols].fillna(self.data[numeric_cols].mean())
-       self.target = self.target.fillna(self.target.mean())
-       missing_after = self.data.isnull().sum().sum() 
-       print(f"Missing values before: {missing_before}")
-       print(f"Missing values after: {missing_after}")
-       
-       print("\n--- Encoding Categorical Variables ---")
-       categorical_columns = self.data.select_dtypes(include=['object']).columns
-       if len(categorical_columns) > 0:
-            print(f"Categorical columns: {list(categorical_columns)}")
-            self.data = pd.get_dummies(self.data, columns=categorical_columns, drop_first=True)
-            print("✓ One hot encoding applied")    
-       else:
+        # ------------------------------------------------------------------ #
+        # Missing values
+        # ------------------------------------------------------------------ #
+        print("\n--- Handling Missing Values ---")
+        missing_before = self.data.isnull().sum().sum()
+
+        self.data = self.data.fillna(self.data.mean(numeric_only=True))
+        self.target = self.target.fillna(self.target.mode()[0])
+
+        missing_after = self.data.isnull().sum().sum()
+        print(f"Missing values before: {missing_before}")
+        print(f"Missing values after: {missing_after}")
+
+        # ------------------------------------------------------------------ #
+        # Encoding categorical columns
+        # ------------------------------------------------------------------ #
+        print("\n--- Encoding Categorical Columns ---")
+        categorical_cols = self.data.select_dtypes(include=['object']).columns
+
+        if len(categorical_cols) == 0:
             print("✓ No categorical columns found")
+        else:
+            for col in categorical_cols:
+                le = LabelEncoder()
+                self.data[col] = le.fit_transform(self.data[col])
+                self.encoders[col] = le
+                print(f"✓ Encoded {col}")
 
+        # ------------------------------------------------------------------ #
+        # Standardisation
+        # ------------------------------------------------------------------ #
+        print("\n--- Feature Standardization ---")
+        self.feature_means = self.data.mean()
 
-       # Feature scaling (standardization)
-       print("\n--- Feature Standardization ---")
-       self.feature_means = self.data.mean()
-       self.feature_stds = self.data.std()
+        # Prevent divide by zero
+        self.feature_stds = self.data.std().replace(0, 1)
 
-       self.processed_data = (self.data - self.feature_means) / self.feature_stds
-       print("✓ Features standardized (mean=0, std=1)")
+        self.processed_data = (self.data - self.feature_means) / self.feature_stds
+        print("✓ Features standardized (mean=0, std=1)")
 
-       # Keep target as is for regression
-       self.processed_target = self.target
+        # ------------------------------------------------------------------ #
+        # Target conversion
+        # ------------------------------------------------------------------ #
+        print("\n--- Target Conversion ---")
+        unique_values = self.target.unique()
+        print(f"Unique target values: {unique_values}")
 
-       print(f"\n--- Processed Dataset Shape ---")
-       print(f"Processed features: {self.processed_data.shape}")
-       print(f"Processed target: {self.processed_target.shape}")
+        if len(unique_values) > 2:
+            print("⚠ WARNING: More than 2 classes detected. Converting to binary.")
+            self.processed_target = (self.target > self.target.median()).astype(int)
+        else:
+            self.processed_target = self.target.astype(int)
 
-       return self.processed_data, self.processed_target
+        print(f"Target classes after processing: {self.processed_target.unique()}")
+
+        # ------------------------------------------------------------------ #
+        print(f"\n--- Processed Dataset Shape ---")
+        print(f"Processed features: {self.processed_data.shape}")
+        print(f"Processed target: {self.processed_target.shape}")
+
+        return self.processed_data, self.processed_target
+
 
 
 class DatasetVisualizer:
@@ -289,44 +321,48 @@ class DatasetVisualizer:
        # 2. Correlation heatmap
        self._plot_correlation_heatmap()
 
-       # 3. Feature distributions
+       # 3. Feature distributions by class
        self._plot_feature_distributions()
 
-       # 4. Scatter plots for top correlated features
-       self._plot_top_correlations()
+       # 4. Box plots for top features
+       self._plot_feature_boxplots()
 
        print("✓ All visualizations created successfully")
 
     def _plot_target_distribution(self) -> None:
        """Plot the distribution of target variable."""
-       plt.figure(figsize=FIGURE_SIZE, dpi=DPI)
+       plt.figure(figsize=(10, 6), dpi=DPI)
+
+       class_counts = self.target.value_counts()
 
        plt.subplot(1, 2, 1)
-       plt.hist(self.target, bins=50, edgecolor='black', alpha=0.7)
-       plt.xlabel('Insurance Charges')
-       plt.ylabel('Frequency')
-       plt.title('Target Distribution (Histogram)')
+       plt.bar(['Not Purchased (0)', 'Purchased (1)'], class_counts.values,
+               color=['green', 'red'], alpha=0.7, edgecolor='black')
+       plt.xlabel('Class')
+       plt.ylabel('Count')
+       plt.title('Class Distribution (Bar Chart)')
        plt.grid(True, alpha=0.3)
 
        plt.subplot(1, 2, 2)
-       plt.boxplot(self.target, vert=True)
-       plt.ylabel('Insurance Charges')
-       plt.title('Target Distribution (Boxplot)')
-       plt.grid(True, alpha=0.3)
+       plt.pie(class_counts.values, labels=['Not Purchased (0)', 'Purchased (1)'],
+               autopct='%1.1f%%', colors=['green', 'red'], startangle=90)
+       plt.title('Class Distribution (Pie Chart)')
 
        plt.tight_layout()
-       plt.savefig('Supervised Learning\\Linear Regression\\graphs\\target_distribution.png', dpi=DPI, bbox_inches='tight')
+       plt.savefig('Supervised Learning/Logistic_Regression/graphs/target_distribution.png',
+                   dpi=DPI, bbox_inches='tight')
        plt.close()
        print("✓ Target distribution plot saved")
 
     def _plot_correlation_heatmap(self) -> None:
        """Plot correlation heatmap between features and target."""
-       # Combine features and target for correlation
        combined_data = self.data.copy()
        combined_data['Target'] = self.target
 
-       plt.figure(figsize=(14, 10), dpi=DPI)
-       correlation_matrix = combined_data.corr()
+       plt.figure(figsize=(12, 10), dpi=DPI)
+       numeric_data = combined_data.select_dtypes(include=[np.number])
+       correlation_matrix = numeric_data.corr()
+
 
        sns.heatmap(
           correlation_matrix,
@@ -340,63 +376,79 @@ class DatasetVisualizer:
        )
        plt.title('Feature Correlation Heatmap', fontsize=16, fontweight='bold')
        plt.tight_layout()
-       plt.savefig('Supervised Learning\\Linear Regression\\graphs\\correlation_heatmap.png', dpi=DPI, bbox_inches='tight')
+       plt.savefig('Supervised Learning/Logistic_Regression/graphs/correlation_heatmap.png',
+                   dpi=DPI, bbox_inches='tight')
        plt.close()
        print("✓ Correlation heatmap saved")
 
     def _plot_feature_distributions(self) -> None:
-       """Plot distributions of all features."""
-       num_features = len(self.data.columns)
-       cols = 3
-       rows = (num_features + cols - 1) // cols
+       """Plot distributions of features by class."""
+       num_features = min(6, len(self.data.columns))  # Plot top 6 features
 
-       fig, axes = plt.subplots(rows, cols, figsize=(15, rows * 3), dpi=DPI)
-       axes = axes.flatten() if num_features > 1 else [axes]
+       fig, axes = plt.subplots(2, 3, figsize=(15, 10), dpi=DPI)
+       axes = axes.flatten()
 
-       for idx, column in enumerate(self.data.columns):
-          axes[idx].hist(self.data[column], bins=30, edgecolor='black', alpha=0.7)
+       for idx, column in enumerate(self.data.columns[:num_features]):
+          # Separate by class
+          class_0 = self.data[self.target == 0][column]
+          class_1 = self.data[self.target == 1][column]
+
+          axes[idx].hist(class_0, bins=30, alpha=0.6, label='Not Purchased',
+                         color='green', edgecolor='black')
+          axes[idx].hist(class_1, bins=30, alpha=0.6, label='Purchased',
+                         color='red', edgecolor='black')
           axes[idx].set_title(f'{column}')
           axes[idx].set_xlabel('Value')
           axes[idx].set_ylabel('Frequency')
+          axes[idx].legend()
           axes[idx].grid(True, alpha=0.3)
 
-       # Hide empty subplots
-       for idx in range(num_features, len(axes)):
-          axes[idx].axis('off')
-
        plt.tight_layout()
-       plt.savefig('Supervised Learning\\Linear Regression\\graphs\\feature_distributions.png', dpi=DPI, bbox_inches='tight')
+       plt.savefig('Supervised Learning/Logistic_Regression/graphs/feature_distributions.png',
+                   dpi=DPI, bbox_inches='tight')
        plt.close()
        print("✓ Feature distributions plot saved")
 
-    def _plot_top_correlations(self) -> None:
-       """Plot scatter plots for top correlated features with target."""
+    def _plot_feature_boxplots(self) -> None:
+       """Plot box plots for top correlated features."""
        # Calculate correlations with target
-       correlations = self.data.corrwith(self.target).abs().sort_values(ascending=False)
+       numeric_data = self.data.select_dtypes(include=[np.number])
+       correlations = numeric_data.corrwith(self.target).abs().sort_values(ascending=False)
        top_features = correlations.head(4).index.tolist()
 
        fig, axes = plt.subplots(2, 2, figsize=(12, 10), dpi=DPI)
        axes = axes.flatten()
 
        for idx, feature in enumerate(top_features):
-          axes[idx].scatter(self.data[feature], self.target, alpha=0.5, s=10)
-          axes[idx].set_xlabel(feature)
-          axes[idx].set_ylabel('Insurance Charges')
-          axes[idx].set_title(f'{feature} vs Target (Corr: {correlations[feature]:.3f})')
+          data_to_plot = [
+             self.data[self.target == 0][feature],
+             self.data[self.target == 1][feature]
+          ]
+
+          bp = axes[idx].boxplot(data_to_plot, labels=['Not Purchased', 'Purchased'],
+                                 patch_artist=True)
+
+          # Color the boxes
+          bp['boxes'][0].set_facecolor('green')
+          bp['boxes'][1].set_facecolor('red')
+
+          axes[idx].set_title(f'{feature} by Class')
+          axes[idx].set_ylabel('Value')
           axes[idx].grid(True, alpha=0.3)
 
        plt.tight_layout()
-       plt.savefig('Supervised Learning\\Linear Regression\\graphs\\top_correlations.png', dpi=DPI, bbox_inches='tight')
+       plt.savefig('Supervised Learning/Logistic_Regression/graphs/feature_boxplots.png',
+                   dpi=DPI, bbox_inches='tight')
        plt.close()
-       print("✓ Top correlations plot saved")
+       print("✓ Feature boxplots saved")
 
 
-class LinearRegressionModel:
+class LogisticRegressionModel:
     """
-    Custom Linear Regression implementation using Gradient Descent.
+    Custom Logistic_Regression implementation using Gradient Descent.
 
-    This class implements linear regression from scratch with batch gradient
-    descent optimization.
+    This class implements binary Logistic_Regression from scratch with
+    mini-batch gradient descent optimization.
     """
 
     def __init__(
@@ -404,21 +456,24 @@ class LinearRegressionModel:
           learning_rate: float = LEARNING_RATE,
           num_iterations: int = NUM_ITERATIONS,
           batch_size: int = BATCH_SIZE,
-          convergence_threshold: float = CONVERGENCE_THRESHOLD
+          convergence_threshold: float = CONVERGENCE_THRESHOLD,
+          gradient_clip: float = GRADIENT_CLIP_VALUE
     ):
        """
-       Initialize the Linear Regression model.
+       Initialize the Logistic_Regression model.
 
        Args:
           learning_rate: Step size for gradient descent
           num_iterations: Maximum number of iterations
           batch_size: Size of mini-batches for gradient descent
           convergence_threshold: Threshold for early stopping
+          gradient_clip: Maximum gradient magnitude
        """
        self.learning_rate = learning_rate
        self.num_iterations = num_iterations
        self.batch_size = batch_size
        self.convergence_threshold = convergence_threshold
+       self.gradient_clip = gradient_clip
 
        self.weights: Optional[np.ndarray] = None
        self.bias: float = 0.0
@@ -435,30 +490,53 @@ class LinearRegressionModel:
        self.weights = np.random.randn(n_features) * 0.01
        self.bias = 0.0
 
+    def _sigmoid(self, z: np.ndarray) -> np.ndarray:
+       """
+       Compute sigmoid activation function.
+
+       Args:
+          z: Linear combination of inputs
+
+       Returns:
+          Sigmoid activation values
+       """
+       # Clip to prevent overflow
+       z = np.clip(z, -500, 500)
+       return 1 / (1 + np.exp(-z))
+
     def _compute_predictions(self, X: np.ndarray) -> np.ndarray:
        """
-       Compute predictions using current weights and bias.
+       Compute probability predictions using current weights and bias.
 
        Args:
           X: Input features of shape (n_samples, n_features)
 
        Returns:
-          Predictions of shape (n_samples,)
+          Probability predictions of shape (n_samples,)
        """
-       return np.dot(X, self.weights) + self.bias
+       z = np.dot(X, self.weights) + self.bias
+       return self._sigmoid(z)
 
     def _compute_loss(self, y_true: np.ndarray, y_pred: np.ndarray) -> float:
        """
-       Compute Mean Squared Error loss.
+       Compute binary cross-entropy loss.
 
        Args:
-          y_true: True target values
-          y_pred: Predicted values
+          y_true: True binary labels
+          y_pred: Predicted probabilities
 
        Returns:
-          MSE loss value
+          Binary cross-entropy loss value
        """
-       return np.mean((y_true - y_pred) ** 2)
+       # Clip predictions to prevent log(0)
+       epsilon = 1e-15
+       y_pred = np.clip(y_pred, epsilon, 1 - epsilon)
+
+       # Binary cross-entropy
+       loss = -np.mean(
+          y_true * np.log(y_pred) + (1 - y_true) * np.log(1 - y_pred)
+       )
+       return loss
 
     def _compute_gradients(
           self,
@@ -471,8 +549,8 @@ class LinearRegressionModel:
 
        Args:
           X: Input features
-          y_true: True target values
-          y_pred: Predicted values
+          y_true: True binary labels
+          y_pred: Predicted probabilities
 
        Returns:
           Tuple of (weight_gradients, bias_gradient)
@@ -480,8 +558,8 @@ class LinearRegressionModel:
        n_samples = X.shape[0]
        error = y_pred - y_true
 
-       weight_gradients = (2 / n_samples) * np.dot(X.T, error)
-       bias_gradient = (2 / n_samples) * np.sum(error)
+       weight_gradients = (1 / n_samples) * np.dot(X.T, error)
+       bias_gradient = (1 / n_samples) * np.sum(error)
 
        return weight_gradients, bias_gradient
 
@@ -512,13 +590,13 @@ class LinearRegressionModel:
 
        return mini_batches
 
-    def fit(self, X: np.ndarray, y: np.ndarray) -> 'LinearRegressionModel':
+    def fit(self, X: np.ndarray, y: np.ndarray) -> 'LogisticRegressionModel':
        """
        Train the model using gradient descent.
 
        Args:
           X: Training features of shape (n_samples, n_features)
-          y: Training targets of shape (n_samples,)
+          y: Training binary labels of shape (n_samples,)
 
        Returns:
           Self for method chaining
@@ -530,6 +608,7 @@ class LinearRegressionModel:
        print(f"Iterations: {self.num_iterations}")
        print(f"Batch Size: {self.batch_size}")
        print(f"Convergence Threshold: {self.convergence_threshold}")
+       print(f"Gradient Clipping: {self.gradient_clip}")
 
        n_samples, n_features = X.shape
        self._initialize_parameters(n_features)
@@ -549,6 +628,18 @@ class LinearRegressionModel:
                 X_batch, y_batch, y_pred
              )
 
+             # Apply gradient clipping
+             weight_gradients = np.clip(
+                weight_gradients,
+                -self.gradient_clip,
+                self.gradient_clip
+             )
+             bias_gradient = np.clip(
+                bias_gradient,
+                -self.gradient_clip,
+                self.gradient_clip
+             )
+
              # Update parameters
              self.weights -= self.learning_rate * weight_gradients
              self.bias -= self.learning_rate * bias_gradient
@@ -559,8 +650,14 @@ class LinearRegressionModel:
           self.loss_history.append(loss)
 
           # Print progress
-          if (iteration + 1) % 100 == 0:
+          if (iteration + 1) % 200 == 0:
              print(f"Iteration {iteration + 1}/{self.num_iterations} - Loss: {loss:.4f}")
+
+          # Check for NaN or Inf
+          if np.isnan(loss) or np.isinf(loss):
+             print(f"\n⚠ WARNING: Loss became {loss} at iteration {iteration + 1}")
+             print("Training stopped early to prevent gradient explosion")
+             break
 
           # Check for convergence
           if abs(prev_loss - loss) < self.convergence_threshold:
@@ -569,34 +666,50 @@ class LinearRegressionModel:
 
           prev_loss = loss
 
-       print(f"✓ Training completed - Final Loss: {loss:.4f}")
+       final_loss = self.loss_history[-1] if self.loss_history else float('nan')
+       print(f"✓ Training completed - Final Loss: {final_loss:.4f}")
        return self
 
-    def predict(self, X: np.ndarray) -> np.ndarray:
+    def predict_proba(self, X: np.ndarray) -> np.ndarray:
        """
-       Make predictions on new data.
+       Predict probabilities for input samples.
 
        Args:
           X: Input features of shape (n_samples, n_features)
 
        Returns:
-          Predictions of shape (n_samples,)
+          Probability predictions of shape (n_samples,)
        """
        if self.weights is None:
           raise ValueError("Model must be trained before making predictions")
 
        return self._compute_predictions(X)
 
+    def predict(self, X: np.ndarray, threshold: float = 0.5) -> np.ndarray:
+       """
+       Predict binary class labels for input samples.
+
+       Args:
+          X: Input features of shape (n_samples, n_features)
+          threshold: Decision threshold (default 0.5)
+
+       Returns:
+          Binary predictions of shape (n_samples,)
+       """
+       probabilities = self.predict_proba(X)
+       return (probabilities >= threshold).astype(int)
+
     def plot_loss_curve(self) -> None:
        """Plot the training loss curve."""
        plt.figure(figsize=(10, 6), dpi=DPI)
-       plt.plot(self.loss_history, linewidth=2)
+       plt.plot(self.loss_history, linewidth=2, color='blue')
        plt.xlabel('Iteration', fontsize=12)
-       plt.ylabel('Loss (MSE)', fontsize=12)
+       plt.ylabel('Loss (Binary Cross-Entropy)', fontsize=12)
        plt.title('Training Loss Curve', fontsize=14, fontweight='bold')
        plt.grid(True, alpha=0.3)
        plt.tight_layout()
-       plt.savefig('Supervised Learning\\Linear Regression\\graphs\\loss_curve.png', dpi=DPI, bbox_inches='tight')
+       plt.savefig('Supervised Learning/Logistic_Regression/graphs/loss_curve.png',
+                   dpi=DPI, bbox_inches='tight')
        plt.close()
        print("✓ Loss curve saved")
 
@@ -604,12 +717,12 @@ class LinearRegressionModel:
 class ModelEvaluator:
     """Class responsible for model evaluation and metrics calculation."""
 
-    def __init__(self, model: LinearRegressionModel):
+    def __init__(self, model: LogisticRegressionModel):
        """
        Initialize the ModelEvaluator.
 
        Args:
-          model: Trained LinearRegressionModel instance
+          model: Trained LogisticRegressionModel instance
        """
        self.model = model
 
@@ -624,7 +737,7 @@ class ModelEvaluator:
 
        Args:
           X: Input features
-          y_true: True target values
+          y_true: True binary labels
           dataset_name: Name of the dataset being evaluated
 
        Returns:
@@ -636,66 +749,81 @@ class ModelEvaluator:
 
        # Make predictions
        y_pred = self.model.predict(X)
+       y_pred_proba = self.model.predict_proba(X)
 
        # Calculate metrics
-       mse = mean_squared_error(y_true, y_pred)
-       rmse = np.sqrt(mse)
-       mae = mean_absolute_error(y_true, y_pred)
-       r2 = r2_score(y_true, y_pred)
+       accuracy = accuracy_score(y_true, y_pred)
+       precision = precision_score(y_true, y_pred, zero_division=0)
+       recall = recall_score(y_true, y_pred, zero_division=0)
+       f1 = f1_score(y_true, y_pred, zero_division=0)
+       roc_auc = roc_auc_score(y_true, y_pred_proba)
 
-       metrics = ModelMetrics(mse=mse, rmse=rmse, mae=mae, r2=r2)
+       metrics = ModelMetrics(
+          accuracy=accuracy,
+          precision=precision,
+          recall=recall,
+          f1=f1,
+          roc_auc=roc_auc
+       )
        print(metrics)
 
-       # Plot predictions vs actual
-       self._plot_predictions(y_true, y_pred, dataset_name)
+       # Print confusion matrix
+       print(f"\nConfusion Matrix:")
+       cm = confusion_matrix(y_true, y_pred)
+       print(cm)
+       print(f"\nClassification Report:")
+       print(classification_report(y_true, y_pred,
+                                   target_names=['Not Purchased', 'Purchased']))
+
+       # Plot confusion matrix and ROC curve
+       self._plot_evaluation(y_true, y_pred, y_pred_proba, dataset_name)
 
        return metrics
 
-    def _plot_predictions(
+    def _plot_evaluation(
           self,
           y_true: np.ndarray,
           y_pred: np.ndarray,
+          y_pred_proba: np.ndarray,
           dataset_name: str
     ) -> None:
        """
-       Plot predicted vs actual values.
+       Plot confusion matrix and ROC curve.
 
        Args:
-          y_true: True target values
-          y_pred: Predicted values
+          y_true: True labels
+          y_pred: Predicted labels
+          y_pred_proba: Predicted probabilities
           dataset_name: Name of the dataset
        """
        fig, axes = plt.subplots(1, 2, figsize=(14, 5), dpi=DPI)
 
-       # Scatter plot
-       axes[0].scatter(y_true, y_pred, alpha=0.5, s=20)
-       axes[0].plot(
-          [y_true.min(), y_true.max()],
-          [y_true.min(), y_true.max()],
-          'r--',
-          lw=2,
-          label='Perfect Prediction'
-       )
-       axes[0].set_xlabel('Actual Values', fontsize=12)
-       axes[0].set_ylabel('Predicted Values', fontsize=12)
-       axes[0].set_title(f'Predictions vs Actual - {dataset_name}', fontsize=14)
-       axes[0].legend()
-       axes[0].grid(True, alpha=0.3)
+       # Confusion Matrix
+       cm = confusion_matrix(y_true, y_pred)
+       sns.heatmap(cm, annot=True, fmt='d', cmap='Blues', ax=axes[0],
+                   xticklabels=['Not Purchased', 'Purchased'],
+                   yticklabels=['Not Purchased', 'Purchased'])
+       axes[0].set_xlabel('Predicted', fontsize=12)
+       axes[0].set_ylabel('Actual', fontsize=12)
+       axes[0].set_title(f'Confusion Matrix - {dataset_name}', fontsize=14)
 
-       # Residual plot
-       residuals = y_true - y_pred
-       axes[1].scatter(y_pred, residuals, alpha=0.5, s=20)
-       axes[1].axhline(y=0, color='r', linestyle='--', lw=2)
-       axes[1].set_xlabel('Predicted Values', fontsize=12)
-       axes[1].set_ylabel('Residuals', fontsize=12)
-       axes[1].set_title(f'Residual Plot - {dataset_name}', fontsize=14)
+       # ROC Curve
+       fpr, tpr, _ = roc_curve(y_true, y_pred_proba)
+       roc_auc = roc_auc_score(y_true, y_pred_proba)
+
+       axes[1].plot(fpr, tpr, linewidth=2, label=f'ROC (AUC = {roc_auc:.3f})')
+       axes[1].plot([0, 1], [0, 1], 'r--', linewidth=2, label='Random')
+       axes[1].set_xlabel('False Positive Rate', fontsize=12)
+       axes[1].set_ylabel('True Positive Rate', fontsize=12)
+       axes[1].set_title(f'ROC Curve - {dataset_name}', fontsize=14)
+       axes[1].legend()
        axes[1].grid(True, alpha=0.3)
 
        plt.tight_layout()
-       filename = f'predictions_{dataset_name.lower().replace(" ", "_")}.png'
-       plt.savefig(f'Supervised Learning\\Linear Regression\\graphs\\{filename}', dpi=DPI, bbox_inches='tight')
+       filename = f'evaluation_{dataset_name.lower().replace(" ", "_")}.png'
+       plt.savefig(f'Supervised Learning/Logistic_Regression/graphs/{filename}', dpi=DPI, bbox_inches='tight')
        plt.close()
-       print(f"✓ Prediction plots saved for {dataset_name}")
+       print(f"✓ Evaluation plots saved for {dataset_name}")
 
 
 class MLPipeline:
@@ -709,7 +837,7 @@ class MLPipeline:
        self.validator: Optional[DatasetValidator] = None
        self.processor: Optional[DatasetProcessor] = None
        self.visualizer: Optional[DatasetVisualizer] = None
-       self.model: Optional[LinearRegressionModel] = None
+       self.model: Optional[LogisticRegressionModel] = None
        self.evaluator: Optional[ModelEvaluator] = None
 
        self.X_train: Optional[np.ndarray] = None
@@ -722,7 +850,7 @@ class MLPipeline:
     def run(self) -> None:
        """Execute the complete ML pipeline."""
        print("\n" + "=" * 70)
-       print("LINEAR REGRESSION PIPELINE - MEDICAL INSURANCE DATASET")
+       print("Logistic_Regression PIPELINE - BINARY CLASSIFICATION")
        print("=" * 70)
 
        # Step 1: Load Dataset
@@ -731,7 +859,7 @@ class MLPipeline:
 
        # Step 2: Validate Dataset
        self.validator = DatasetValidator(data, target)
-       is_valid = self.validator.zverify_dataset()
+       is_valid = self.validator.verify_dataset()
 
        if not is_valid:
           print("\n⚠ Dataset validation found issues. Proceeding with caution...")
@@ -741,19 +869,19 @@ class MLPipeline:
        processed_data, processed_target = self.processor.process_dataset()
 
        # Step 4: Visualize Dataset
-       self.visualizer = DatasetVisualizer(processed_data, processed_target)
-
+       self.visualizer = DatasetVisualizer(data, target)
        self.visualizer.visualize_dataset()
 
        # Step 5: Train-Validation-Test Split
        self._split_dataset(processed_data, processed_target)
 
        # Step 6: Train Model
-       self.model = LinearRegressionModel(
+       self.model = LogisticRegressionModel(
           learning_rate=LEARNING_RATE,
           num_iterations=NUM_ITERATIONS,
           batch_size=BATCH_SIZE,
-          convergence_threshold=CONVERGENCE_THRESHOLD
+          convergence_threshold=CONVERGENCE_THRESHOLD,
+          gradient_clip=GRADIENT_CLIP_VALUE
        )
        self.model.fit(self.X_train, self.y_train)
        self.model.plot_loss_curve()
@@ -827,7 +955,8 @@ class MLPipeline:
        X_temp, self.X_test, y_temp, self.y_test = train_test_split(
           X, y,
           test_size=TEST_SIZE,
-          random_state=RANDOM_STATE
+          random_state=RANDOM_STATE,
+          stratify=y
        )
 
        # Second split: separate validation from training
@@ -835,13 +964,20 @@ class MLPipeline:
        self.X_train, self.X_val, self.y_train, self.y_val = train_test_split(
           X_temp, y_temp,
           test_size=val_size_adjusted,
-          random_state=RANDOM_STATE
+          random_state=RANDOM_STATE,
+          stratify=y_temp
        )
 
        print(f"Training set size:   {self.X_train.shape[0]} samples ({(1 - TEST_SIZE - VALIDATION_SIZE) * 100:.1f}%)")
        print(f"Validation set size: {self.X_val.shape[0]} samples ({VALIDATION_SIZE * 100:.1f}%)")
        print(f"Test set size:       {self.X_test.shape[0]} samples ({TEST_SIZE * 100:.1f}%)")
        print(f"Total samples:       {X.shape[0]}")
+
+       # Print class distribution
+       print(f"\nClass distribution in training set:")
+       unique, counts = np.unique(self.y_train, return_counts=True)
+       for cls, count in zip(unique, counts):
+          print(f"  Class {cls}: {count} ({count / len(self.y_train) * 100:.1f}%)")
 
     def _test_with_new_data(self) -> None:
        """Test model with synthetic new data not in the dataset."""
@@ -858,12 +994,14 @@ class MLPipeline:
 
        # Make predictions
        predictions = self.model.predict(new_data)
+       probabilities = self.model.predict_proba(new_data)
 
        print(f"\nGenerated {n_new_samples} new synthetic samples:")
-       print(f"\n{'Sample':<10}{'Predicted Price':<20}")
-       print("-" * 30)
-       for i, pred in enumerate(predictions, 1):
-          print(f"{i:<10}{pred:<20.4f}")
+       print(f"\n{'Sample':<10}{'Probability':<15}{'Prediction':<15}{'Class'}")
+       print("-" * 60)
+       for i, (prob, pred) in enumerate(zip(probabilities, predictions), 1):
+          class_name = 'Purchased' if pred == 1 else 'Not Purchased'
+          print(f"{i:<10}{prob:<15.4f}{pred:<15}{class_name}")
 
        print("\n✓ Model successfully made predictions on unseen data")
 
@@ -877,12 +1015,14 @@ class MLPipeline:
           'model': self.model,
           'feature_means': self.processor.feature_means,
           'feature_stds': self.processor.feature_stds,
-          'feature_names': list(self.processor.processed_data.columns),
+          'feature_names': self.processor.processed_data.columns.tolist(),
+          'encoders': self.processor.encoders,   # ADD THIS
           'training_metrics': {
              'final_loss': self.model.loss_history[-1] if self.model.loss_history else None,
              'num_iterations': len(self.model.loss_history)
-          }
-       }
+            }
+      }
+
 
        joblib.dump(model_data, MODEL_SAVE_PATH)
        print(f"✓ Model saved successfully to: {MODEL_SAVE_PATH}")
@@ -903,20 +1043,20 @@ class MLPipeline:
        predictions = loaded_model.predict(self.X_test)
 
        # Calculate metrics
-       mse = mean_squared_error(self.y_test, predictions)
-       r2 = r2_score(self.y_test, predictions)
+       accuracy = accuracy_score(self.y_test, predictions)
+       f1 = f1_score(self.y_test, predictions)
 
        print(f"\nLoaded Model Performance on Test Set:")
-       print(f"MSE: {mse:.4f}")
-       print(f"R² Score: {r2:.4f}")
+       print(f"Accuracy: {accuracy:.4f}")
+       print(f"F1-Score: {f1:.4f}")
        print("\n✓ Loaded model produces identical results")
+
 
 def main():
     """Main function to run the ML pipeline."""
     try:
        pipeline = MLPipeline()
        pipeline.run()
-
     except Exception as e:
        print(f"\n❌ ERROR: An error occurred during pipeline execution:")
        print(f"{type(e).__name__}: {str(e)}")
