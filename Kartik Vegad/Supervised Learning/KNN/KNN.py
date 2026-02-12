@@ -1,6 +1,6 @@
 import warnings
 from dataclasses import dataclass
-from typing import Optional, Tuple
+from typing import Tuple
 
 import numpy as np
 import pandas as pd
@@ -19,6 +19,7 @@ from sklearn.metrics import (
     f1_score,
     confusion_matrix
 )
+from sklearn.decomposition import PCA
 
 warnings.filterwarnings("ignore")
 
@@ -32,13 +33,18 @@ RANDOM_STATE = 42
 TEST_SIZE = 0.2
 VALIDATION_SIZE = 0.1
 
-K_NEIGHBORS = 5
+# ---- HYPERPARAMETERS ----
+K_RANGE = range(1, 31, 2)
+DISTANCE_METRIC = "minkowski"
+WEIGHTS = "distance"
 
 MODEL_SAVE_PATH = "Supervised Learning/KNN/knn_model.pkl"
 
 FIGURE_SIZE = (12, 8)
 DPI = 100
 STYLE = "seaborn-v0_8-darkgrid"
+
+GRAPH_DIR = "Supervised Learning/KNN/graphs/"
 
 
 # =============================================================================
@@ -52,17 +58,6 @@ class ClassificationMetrics:
     recall: float
     f1_score: float
 
-    def __str__(self) -> str:
-        return (
-            f"\nModel Performance Metrics\n"
-            f"{'=' * 50}\n"
-            f"Accuracy  : {self.accuracy:.4f}\n"
-            f"Precision : {self.precision:.4f}\n"
-            f"Recall    : {self.recall:.4f}\n"
-            f"F1 Score  : {self.f1_score:.4f}\n"
-            f"{'=' * 50}"
-        )
-
 
 # =============================================================================
 # DATASET LOADER
@@ -70,55 +65,10 @@ class ClassificationMetrics:
 
 class DatasetLoader:
     def load_data(self) -> Tuple[pd.DataFrame, pd.Series]:
-        print(f"\n{'=' * 70}")
-        print("LOADING DATASET")
-        print(f"{'=' * 70}")
-
         iris = load_iris()
         X = pd.DataFrame(iris.data, columns=iris.feature_names)
         y = pd.Series(iris.target, name="species")
-
-        print("✓ Dataset loaded successfully")
-        print(f"✓ Samples: {X.shape[0]}")
-        print(f"✓ Features: {X.shape[1]}")
-        print(f"✓ Target classes: {y.unique()}")
-
         return X, y
-
-
-# =============================================================================
-# DATASET VALIDATOR
-# =============================================================================
-
-class DatasetValidator:
-    def __init__(self, X: pd.DataFrame, y: pd.Series):
-        self.X = X
-        self.y = y
-
-    def verify(self) -> bool:
-        print(f"\n{'=' * 70}")
-        print("DATASET VERIFICATION")
-        print(f"{'=' * 70}")
-
-        if self.X.empty or self.y.empty:
-            print("✗ ERROR: Dataset is empty")
-            return False
-
-        print("✓ Dataset is not empty")
-        print(f"✓ Feature shape: {self.X.shape}")
-        print(f"✓ Target distribution:\n{self.y.value_counts()}")
-
-        if self.X.isnull().any().any():
-            print("⚠ WARNING: Missing values detected in features")
-        else:
-            print("✓ No missing values in features")
-
-        if self.y.isnull().any():
-            print("⚠ WARNING: Missing values detected in target")
-        else:
-            print("✓ No missing values in target")
-
-        return True
 
 
 # =============================================================================
@@ -129,41 +79,61 @@ class DatasetProcessor:
     def __init__(self):
         self.scaler = StandardScaler()
 
-    def fit_transform(self, X_train: pd.DataFrame) -> np.ndarray:
-        return self.scaler.fit_transform(X_train)
+    def fit_transform(self, X):
+        return self.scaler.fit_transform(X)
 
-    def transform(self, X: pd.DataFrame) -> np.ndarray:
+    def transform(self, X):
         return self.scaler.transform(X)
 
 
 # =============================================================================
-# DATASET VISUALIZER
+# DATASET VISUALIZER (EDA)
 # =============================================================================
 
 class DatasetVisualizer:
-    def __init__(self, X: pd.DataFrame, y: pd.Series):
-        self.X = X
-        self.y = y
+    def __init__(self, X, y):
+        self.df = pd.concat([X, y], axis=1)
         plt.style.use(STYLE)
 
-    def visualize(self) -> None:
-        print(f"\n{'=' * 70}")
-        print("DATASET VISUALIZATION")
-        print(f"{'=' * 70}")
-
-        sns.pairplot(
-            pd.concat([self.X, self.y], axis=1),
-            hue="species",
-            corner=True
-        )
-
-        plt.savefig(
-            "Supervised Learning/KNN/graphs/pairplot.png",
-            dpi=DPI
-        )
+    def eda_plots(self):
+        sns.pairplot(self.df, hue="species", corner=True)
+        plt.savefig(GRAPH_DIR + "pairplot.png", dpi=DPI)
         plt.close()
 
-        print("✓ Pairplot saved")
+        self.df.hist(figsize=(12, 8))
+        plt.savefig(GRAPH_DIR + "feature_histograms.png", dpi=DPI)
+        plt.close()
+
+
+# =============================================================================
+# KNN TUNER
+# =============================================================================
+
+class KNNTuner:
+    def tune_k(self, X_train, y_train, X_val, y_val):
+        accuracies = []
+
+        for k in K_RANGE:
+            model = KNeighborsClassifier(
+                n_neighbors=k,
+                weights=WEIGHTS,
+                metric=DISTANCE_METRIC
+            )
+            model.fit(X_train, y_train)
+            acc = accuracy_score(y_val, model.predict(X_val))
+            accuracies.append(acc)
+
+        best_k = list(K_RANGE)[np.argmax(accuracies)]
+
+        plt.figure(figsize=FIGURE_SIZE)
+        plt.plot(list(K_RANGE), accuracies, marker="o")
+        plt.xlabel("K Value")
+        plt.ylabel("Validation Accuracy")
+        plt.title("Accuracy vs K")
+        plt.savefig(GRAPH_DIR + "accuracy_vs_k.png", dpi=DPI)
+        plt.close()
+
+        return best_k
 
 
 # =============================================================================
@@ -171,14 +141,17 @@ class DatasetVisualizer:
 # =============================================================================
 
 class KNNModel:
-    def __init__(self, k: int = K_NEIGHBORS):
-        self.k = k
-        self.model = KNeighborsClassifier(n_neighbors=self.k)
+    def __init__(self, k):
+        self.model = KNeighborsClassifier(
+            n_neighbors=k,
+            weights=WEIGHTS,
+            metric=DISTANCE_METRIC
+        )
 
-    def fit(self, X: np.ndarray, y: np.ndarray) -> None:
+    def fit(self, X, y):
         self.model.fit(X, y)
 
-    def predict(self, X: np.ndarray) -> np.ndarray:
+    def predict(self, X):
         return self.model.predict(X)
 
 
@@ -187,57 +160,50 @@ class KNNModel:
 # =============================================================================
 
 class ModelEvaluator:
-    def __init__(self, model: KNNModel):
-        self.model = model
+    def evaluate(self, model, X, y, name):
+        preds = model.predict(X)
 
-    def evaluate(
-        self,
-        X: np.ndarray,
-        y_true: np.ndarray,
-        dataset_name: str
-    ) -> ClassificationMetrics:
-
-        print(f"\n{'=' * 70}")
-        print(f"MODEL EVALUATION - {dataset_name}")
-        print(f"{'=' * 70}")
-
-        y_pred = self.model.predict(X)
-
-        metrics = ClassificationMetrics(
-            accuracy=accuracy_score(y_true, y_pred),
-            precision=precision_score(y_true, y_pred, average="macro"),
-            recall=recall_score(y_true, y_pred, average="macro"),
-            f1_score=f1_score(y_true, y_pred, average="macro")
-        )
-
-        print(metrics)
-
-        self._plot_confusion_matrix(
-            confusion_matrix(y_true, y_pred),
-            dataset_name
-        )
-
-        return metrics
-
-    def _plot_confusion_matrix(
-        self,
-        cm: np.ndarray,
-        dataset_name: str
-    ) -> None:
-
-        plt.figure(figsize=(6, 5), dpi=DPI)
+        cm = confusion_matrix(y, preds)
         sns.heatmap(cm, annot=True, fmt="d", cmap="Blues")
-        plt.title(f"Confusion Matrix - {dataset_name}")
-        plt.xlabel("Predicted")
-        plt.ylabel("Actual")
-
-        plt.savefig(
-            f"Supervised Learning/KNN/graphs/confusion_matrix_{dataset_name.lower().replace(' ', '_')}.png",
-            dpi=DPI
-        )
+        plt.title(f"Confusion Matrix - {name}")
+        plt.savefig(GRAPH_DIR + f"confusion_matrix_{name.lower()}.png", dpi=DPI)
         plt.close()
 
-        print("✓ Confusion matrix saved")
+        return ClassificationMetrics(
+            accuracy=accuracy_score(y, preds),
+            precision=precision_score(y, preds, average="macro"),
+            recall=recall_score(y, preds, average="macro"),
+            f1_score=f1_score(y, preds, average="macro")
+        )
+
+
+# =============================================================================
+# DECISION BOUNDARY PLOT (PCA 2D)
+# =============================================================================
+
+def plot_decision_boundary(model, X, y):
+    pca = PCA(n_components=2)
+    X_2d = pca.fit_transform(X)
+
+    model_2d = KNeighborsClassifier(n_neighbors=model.model.n_neighbors)
+    model_2d.fit(X_2d, y)
+
+    x_min, x_max = X_2d[:, 0].min() - 1, X_2d[:, 0].max() + 1
+    y_min, y_max = X_2d[:, 1].min() - 1, X_2d[:, 1].max() + 1
+
+    xx, yy = np.meshgrid(
+        np.linspace(x_min, x_max, 300),
+        np.linspace(y_min, y_max, 300)
+    )
+
+    Z = model_2d.predict(np.c_[xx.ravel(), yy.ravel()])
+    Z = Z.reshape(xx.shape)
+
+    plt.contourf(xx, yy, Z, alpha=0.3)
+    plt.scatter(X_2d[:, 0], X_2d[:, 1], c=y)
+    plt.title("KNN Decision Boundary (PCA Reduced)")
+    plt.savefig(GRAPH_DIR + "decision_boundary.png", dpi=DPI)
+    plt.close()
 
 
 # =============================================================================
@@ -245,75 +211,44 @@ class ModelEvaluator:
 # =============================================================================
 
 class MLPipeline:
-    def run(self) -> None:
-        print(f"\n{'=' * 70}")
-        print("KNN CLASSIFICATION PIPELINE")
-        print(f"{'=' * 70}")
+    def run(self):
+        X, y = DatasetLoader().load_data()
 
-        # Load
-        loader = DatasetLoader()
-        X, y = loader.load_data()
+        DatasetVisualizer(X, y).eda_plots()
 
-        # Validate
-        DatasetValidator(X, y).verify()
-
-        # Visualize
-        DatasetVisualizer(X, y).visualize()
-
-        # Split dataset
         X_temp, X_test, y_temp, y_test = train_test_split(
-            X, y,
-            test_size=TEST_SIZE,
-            random_state=RANDOM_STATE,
-            stratify=y
+            X, y, test_size=TEST_SIZE, stratify=y, random_state=RANDOM_STATE
         )
 
         val_ratio = VALIDATION_SIZE / (1 - TEST_SIZE)
         X_train, X_val, y_train, y_val = train_test_split(
-            X_temp, y_temp,
-            test_size=val_ratio,
-            random_state=RANDOM_STATE,
-            stratify=y_temp
+            X_temp, y_temp, test_size=val_ratio,
+            stratify=y_temp, random_state=RANDOM_STATE
         )
 
-        print("\nDataset Split Summary:")
-        print(f"Training samples:   {X_train.shape[0]}")
-        print(f"Validation samples: {X_val.shape[0]}")
-        print(f"Test samples:       {X_test.shape[0]}")
-
-        # Process
         processor = DatasetProcessor()
-        X_train_scaled = processor.fit_transform(X_train)
-        X_val_scaled = processor.transform(X_val)
-        X_test_scaled = processor.transform(X_test)
+        X_train = processor.fit_transform(X_train)
+        X_val = processor.transform(X_val)
+        X_test = processor.transform(X_test)
 
-        # Train model
-        model = KNNModel()
-        model.fit(X_train_scaled, y_train.values)
+        best_k = KNNTuner().tune_k(X_train, y_train, X_val, y_val)
 
-        # Evaluate
-        evaluator = ModelEvaluator(model)
-        evaluator.evaluate(X_train_scaled, y_train.values, "Training Set")
-        evaluator.evaluate(X_val_scaled, y_val.values, "Validation Set")
-        evaluator.evaluate(X_test_scaled, y_test.values, "Test Set")
+        model = KNNModel(best_k)
+        model.fit(X_train, y_train)
 
-        # Save model
+        evaluator = ModelEvaluator()
+        evaluator.evaluate(model, X_test, y_test, "test")
+
+        plot_decision_boundary(model, X_train, y_train)
+
         joblib.dump(
-            {
-                "model": model,
-                "scaler": processor
-            },
+            {"model": model, "scaler": processor},
             MODEL_SAVE_PATH
         )
 
-        print(f"\n✓ Model saved successfully at: {MODEL_SAVE_PATH}")
-        print(f"\n{'=' * 70}")
-        print("PIPELINE COMPLETED SUCCESSFULLY")
-        print(f"{'=' * 70}")
 
 def main():
-    pipeline = MLPipeline()
-    pipeline.run()
+    MLPipeline().run()
 
 
 if __name__ == "__main__":
