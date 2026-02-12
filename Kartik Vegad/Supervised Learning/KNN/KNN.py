@@ -1,194 +1,320 @@
-from typing import Dict, Tuple
-import pandas as pd
+import warnings
+from dataclasses import dataclass
+from typing import Optional, Tuple
+
 import numpy as np
+import pandas as pd
+import matplotlib.pyplot as plt
+import seaborn as sns
+import joblib
 
 from sklearn.datasets import load_iris
 from sklearn.model_selection import train_test_split
 from sklearn.preprocessing import StandardScaler
 from sklearn.neighbors import KNeighborsClassifier
-from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score, confusion_matrix
+from sklearn.metrics import (
+    accuracy_score,
+    precision_score,
+    recall_score,
+    f1_score,
+    confusion_matrix
+)
+
+warnings.filterwarnings("ignore")
+
+# =============================================================================
+# GLOBAL CONFIGURATION
+# =============================================================================
+
+DATASET_NAME = "Iris Dataset"
+RANDOM_STATE = 42
+
+TEST_SIZE = 0.2
+VALIDATION_SIZE = 0.1
+
+K_NEIGHBORS = 5
+
+MODEL_SAVE_PATH = "Supervised Learning/KNN/knn_model.pkl"
+
+FIGURE_SIZE = (12, 8)
+DPI = 100
+STYLE = "seaborn-v0_8-darkgrid"
 
 
-# 1. Data_Loading
-class Data_Loading:
-    def load(self) -> Tuple[pd.DataFrame, pd.Series]:
+# =============================================================================
+# METRICS DATA CLASS
+# =============================================================================
+
+@dataclass
+class ClassificationMetrics:
+    accuracy: float
+    precision: float
+    recall: float
+    f1_score: float
+
+    def __str__(self) -> str:
+        return (
+            f"\nModel Performance Metrics\n"
+            f"{'=' * 50}\n"
+            f"Accuracy  : {self.accuracy:.4f}\n"
+            f"Precision : {self.precision:.4f}\n"
+            f"Recall    : {self.recall:.4f}\n"
+            f"F1 Score  : {self.f1_score:.4f}\n"
+            f"{'=' * 50}"
+        )
+
+
+# =============================================================================
+# DATASET LOADER
+# =============================================================================
+
+class DatasetLoader:
+    def load_data(self) -> Tuple[pd.DataFrame, pd.Series]:
+        print(f"\n{'=' * 70}")
+        print("LOADING DATASET")
+        print(f"{'=' * 70}")
+
         iris = load_iris()
+        X = pd.DataFrame(iris.data, columns=iris.feature_names)
+        y = pd.Series(iris.target, name="species")
 
-        X = pd.DataFrame(
-            iris.data,
-            columns=iris.feature_names
-        )
-
-        y = pd.Series(
-            iris.target,
-            name="species"
-        )
+        print("✓ Dataset loaded successfully")
+        print(f"✓ Samples: {X.shape[0]}")
+        print(f"✓ Features: {X.shape[1]}")
+        print(f"✓ Target classes: {y.unique()}")
 
         return X, y
 
 
-# 2. Data_Verifying
-class Data_Verifying:
+# =============================================================================
+# DATASET VALIDATOR
+# =============================================================================
+
+class DatasetValidator:
     def __init__(self, X: pd.DataFrame, y: pd.Series):
         self.X = X
         self.y = y
 
-    def verify(self) -> None:
-        print("Shape of Feature Dataset:", self.X.shape)
-        print("Feature Columns:", self.X.columns.tolist())
-        print("Feature Data Types:\n", self.X.dtypes)
+    def verify(self) -> bool:
+        print(f"\n{'=' * 70}")
+        print("DATASET VERIFICATION")
+        print(f"{'=' * 70}")
 
-        print("\nTarget Distribution:\n", self.y.value_counts())
+        if self.X.empty or self.y.empty:
+            print("✗ ERROR: Dataset is empty")
+            return False
 
-        print("\nFirst 5 Rows of Features:\n", self.X.head())
+        print("✓ Dataset is not empty")
+        print(f"✓ Feature shape: {self.X.shape}")
+        print(f"✓ Target distribution:\n{self.y.value_counts()}")
 
+        if self.X.isnull().any().any():
+            print("⚠ WARNING: Missing values detected in features")
+        else:
+            print("✓ No missing values in features")
 
-# 3. Data_Validation
-class Data_Validation:
-    def __init__(self, X: pd.DataFrame, y: pd.Series):
-        self.X = X
-        self.y = y
+        if self.y.isnull().any():
+            print("⚠ WARNING: Missing values detected in target")
+        else:
+            print("✓ No missing values in target")
 
-    def validate(self) -> Dict[str, bool]:
-        return {
-            "Missing Values in Features": self.X.isnull().any().any(),
-            "Missing Values in Target": self.y.isnull().any(),
-            "Duplicate Feature Rows": self.X.duplicated().any(),
-            "Invalid Target Labels":
-                not set(self.y.unique()).issubset({0, 1, 2})
-        }
-
-
-# 4. Data_Processor
-class Data_Processor:
-    def __init__(self, X: pd.DataFrame, y: pd.Series):
-        self.X = X.copy()
-        self.y = y.copy()
-
-    def process(self) -> Tuple[pd.DataFrame, pd.Series]:
-        return self.X, self.y
+        return True
 
 
+# =============================================================================
+# DATASET PROCESSOR
+# =============================================================================
 
-# 5. Dataset_Splitting
-class Dataset_Splitting:
-    def split(
-        self,
-        X: pd.DataFrame,
-        y: pd.Series
-    ) -> Tuple[pd.DataFrame, pd.DataFrame, pd.DataFrame,
-               np.ndarray, np.ndarray, np.ndarray]:
-
-        X_train, X_temp, y_train, y_temp = train_test_split(
-            X, y, test_size=0.3, random_state=42, stratify=y
-        )
-
-        X_val, X_test, y_val, y_test = train_test_split(
-            X_temp, y_temp, test_size=0.5, random_state=42, stratify=y_temp
-        )
-
-        return X_train, X_val, X_test, y_train.values, y_val.values, y_test.values
-
-
-# 6. Dataset_Transforming
-class Dataset_Transforming:
+class DatasetProcessor:
     def __init__(self):
         self.scaler = StandardScaler()
 
-    def fit(self, X_train: pd.DataFrame) -> None:
-        self.scaler.fit(X_train)
+    def fit_transform(self, X_train: pd.DataFrame) -> np.ndarray:
+        return self.scaler.fit_transform(X_train)
 
     def transform(self, X: pd.DataFrame) -> np.ndarray:
         return self.scaler.transform(X)
 
 
-# 7. KNN_Model
-class KNN_Model:
-    def __init__(self, k: int = 5):
+# =============================================================================
+# DATASET VISUALIZER
+# =============================================================================
+
+class DatasetVisualizer:
+    def __init__(self, X: pd.DataFrame, y: pd.Series):
+        self.X = X
+        self.y = y
+        plt.style.use(STYLE)
+
+    def visualize(self) -> None:
+        print(f"\n{'=' * 70}")
+        print("DATASET VISUALIZATION")
+        print(f"{'=' * 70}")
+
+        sns.pairplot(
+            pd.concat([self.X, self.y], axis=1),
+            hue="species",
+            corner=True
+        )
+
+        plt.savefig(
+            "Supervised Learning/KNN/graphs/pairplot.png",
+            dpi=DPI
+        )
+        plt.close()
+
+        print("✓ Pairplot saved")
+
+
+# =============================================================================
+# KNN MODEL
+# =============================================================================
+
+class KNNModel:
+    def __init__(self, k: int = K_NEIGHBORS):
         self.k = k
         self.model = KNeighborsClassifier(n_neighbors=self.k)
 
-    def train(self, X: np.ndarray, y: np.ndarray) -> None:
+    def fit(self, X: np.ndarray, y: np.ndarray) -> None:
         self.model.fit(X, y)
 
     def predict(self, X: np.ndarray) -> np.ndarray:
         return self.model.predict(X)
 
 
-# 8. Model_Training
-class Model_Training:
-    def __init__(self, model: KNN_Model):
+# =============================================================================
+# MODEL EVALUATOR
+# =============================================================================
+
+class ModelEvaluator:
+    def __init__(self, model: KNNModel):
         self.model = model
 
-    def train(self, X: np.ndarray, y: np.ndarray) -> None:
-        self.model.train(X, y)
-
-
-# 9. Model_Evaluation
-class Model_Evaluation:
     def evaluate(
         self,
-        model: KNN_Model,
         X: np.ndarray,
-        y: np.ndarray
-    ) -> Dict[str, float]:
+        y_true: np.ndarray,
+        dataset_name: str
+    ) -> ClassificationMetrics:
 
-        predictions = model.predict(X)
+        print(f"\n{'=' * 70}")
+        print(f"MODEL EVALUATION - {dataset_name}")
+        print(f"{'=' * 70}")
 
-        return {
-            "Accuracy": accuracy_score(y, predictions),
-            "Precision": precision_score(y, predictions, average="macro"),
-            "Recall": recall_score(y, predictions, average="macro"),
-            "F1 Score": f1_score(y, predictions, average="macro")
-        }
+        y_pred = self.model.predict(X)
 
-    def confusion_matrix(
+        metrics = ClassificationMetrics(
+            accuracy=accuracy_score(y_true, y_pred),
+            precision=precision_score(y_true, y_pred, average="macro"),
+            recall=recall_score(y_true, y_pred, average="macro"),
+            f1_score=f1_score(y_true, y_pred, average="macro")
+        )
+
+        print(metrics)
+
+        self._plot_confusion_matrix(
+            confusion_matrix(y_true, y_pred),
+            dataset_name
+        )
+
+        return metrics
+
+    def _plot_confusion_matrix(
         self,
-        model: KNN_Model,
-        X: np.ndarray,
-        y: np.ndarray
-    ) -> np.ndarray:
+        cm: np.ndarray,
+        dataset_name: str
+    ) -> None:
 
-        return confusion_matrix(y, model.predict(X))
+        plt.figure(figsize=(6, 5), dpi=DPI)
+        sns.heatmap(cm, annot=True, fmt="d", cmap="Blues")
+        plt.title(f"Confusion Matrix - {dataset_name}")
+        plt.xlabel("Predicted")
+        plt.ylabel("Actual")
+
+        plt.savefig(
+            f"Supervised Learning/KNN/graphs/confusion_matrix_{dataset_name.lower().replace(' ', '_')}.png",
+            dpi=DPI
+        )
+        plt.close()
+
+        print("✓ Confusion matrix saved")
 
 
-# 10. Pipeline
-class Pipeline:
-    def __init__(self, k: int = 5):
-        self.k = k
+# =============================================================================
+# ML PIPELINE
+# =============================================================================
 
+class MLPipeline:
     def run(self) -> None:
-        X, y = Data_Loading().load()
+        print(f"\n{'=' * 70}")
+        print("KNN CLASSIFICATION PIPELINE")
+        print(f"{'=' * 70}")
 
-        Data_Verifying(X, y).verify()
+        # Load
+        loader = DatasetLoader()
+        X, y = loader.load_data()
 
-        validation_report = Data_Validation(X, y).validate()
-        print("\nValidation Report:", validation_report)
+        # Validate
+        DatasetValidator(X, y).verify()
 
-        X_clean, y_clean = Data_Processor(X, y).process()
+        # Visualize
+        DatasetVisualizer(X, y).visualize()
 
-        splitter = Dataset_Splitting()
-        X_train_raw, X_val_raw, X_test_raw, y_train, y_val, y_test = splitter.split(
-            X_clean, y_clean
+        # Split dataset
+        X_temp, X_test, y_temp, y_test = train_test_split(
+            X, y,
+            test_size=TEST_SIZE,
+            random_state=RANDOM_STATE,
+            stratify=y
         )
 
-        transformer = Dataset_Transforming()
-        transformer.fit(X_train_raw)
-
-        X_train = transformer.transform(X_train_raw)
-        X_test = transformer.transform(X_test_raw)
-
-        model = KNN_Model(k=self.k)
-        Model_Training(model).train(X_train, y_train)
-
-        metrics = Model_Evaluation().evaluate(model, X_test, y_test)
-        print("\nModel Evaluation Metrics:", metrics)
-
-        print(
-            "\nConfusion Matrix:\n",
-            Model_Evaluation().confusion_matrix(model, X_test, y_test)
+        val_ratio = VALIDATION_SIZE / (1 - TEST_SIZE)
+        X_train, X_val, y_train, y_val = train_test_split(
+            X_temp, y_temp,
+            test_size=val_ratio,
+            random_state=RANDOM_STATE,
+            stratify=y_temp
         )
+
+        print("\nDataset Split Summary:")
+        print(f"Training samples:   {X_train.shape[0]}")
+        print(f"Validation samples: {X_val.shape[0]}")
+        print(f"Test samples:       {X_test.shape[0]}")
+
+        # Process
+        processor = DatasetProcessor()
+        X_train_scaled = processor.fit_transform(X_train)
+        X_val_scaled = processor.transform(X_val)
+        X_test_scaled = processor.transform(X_test)
+
+        # Train model
+        model = KNNModel()
+        model.fit(X_train_scaled, y_train.values)
+
+        # Evaluate
+        evaluator = ModelEvaluator(model)
+        evaluator.evaluate(X_train_scaled, y_train.values, "Training Set")
+        evaluator.evaluate(X_val_scaled, y_val.values, "Validation Set")
+        evaluator.evaluate(X_test_scaled, y_test.values, "Test Set")
+
+        # Save model
+        joblib.dump(
+            {
+                "model": model,
+                "scaler": processor
+            },
+            MODEL_SAVE_PATH
+        )
+
+        print(f"\n✓ Model saved successfully at: {MODEL_SAVE_PATH}")
+        print(f"\n{'=' * 70}")
+        print("PIPELINE COMPLETED SUCCESSFULLY")
+        print(f"{'=' * 70}")
+
+def main():
+    pipeline = MLPipeline()
+    pipeline.run()
 
 
 if __name__ == "__main__":
-    Pipeline(k=5).run()
+    main()
