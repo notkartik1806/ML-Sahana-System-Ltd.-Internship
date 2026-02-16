@@ -32,7 +32,7 @@ print(min(list1))
 # 1.append
 # append is use to update the data
 
-aList.append(2009)
+# aList.append(2009)
 print("Updated List : ", aList)
 
 # Output
