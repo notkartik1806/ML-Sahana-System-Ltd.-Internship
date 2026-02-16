@@ -1,0 +1,14 @@
+user input values in a variable like
+
+a=1,a,2,b,3,4,55,asit,nimesh
+
+str_list=[]
+
+int_list=[]
+
+store int values inside int_list as integer
+    -perform min and max function
+
+store string values inside str_list as string
+    -perform reverse function
+

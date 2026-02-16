@@ -1,0 +1,34 @@
+HDFCBank->withdraw()
+	->max transaction  limit-3
+	->max amount limit-20,000
+
+AXISBank->withdraw()
+	->max transaction limit-5
+	->max amount limit-30,000
+
+
+(Main Class)
+ATM->inputAmount()
+
+
+1)user input choice for  bank name
+
+2)user input amount to withdraw
+
+3)validate input amount limit->custom exception class(Max limit exceeded)
+
+4)validate the max transaction limit->custom exception class(Max limit exceeded)
+
+5)update the max amount limit and max transaction limit for successful transaction and print message also
+
+6)Ask user for next transaction: yes/no
+	if yes:
+		contiue with sequence no (2)
+	if no:
+		terminate the process
+
+NOTE:
+1)Terminate only when transaction max limit exceeded or amount max limit exceeded or user 
+  give no input for next transaction
+
+2)mandatory to achieve encapsulation(__) and polymorphism(withdraw()) in program
