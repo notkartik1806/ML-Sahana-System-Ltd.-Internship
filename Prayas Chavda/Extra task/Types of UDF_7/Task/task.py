@@ -1,3 +1,5 @@
+# Doubt
+
 def calculate(*lists):
 
     if len(lists) == 1:
