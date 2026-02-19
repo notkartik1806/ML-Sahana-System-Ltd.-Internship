@@ -1,17 +1,16 @@
-# Decision_Tree.py
+# decision_tree_training.py
 
-import warnings
+import os
+import logging
 from dataclasses import dataclass
-from typing import Tuple
+from typing import Dict
 
-import numpy as np
 import pandas as pd
 import matplotlib.pyplot as plt
 import seaborn as sns
 import joblib
-import os
 
-from sklearn.model_selection import train_test_split
+from sklearn.model_selection import train_test_split, GridSearchCV
 from sklearn.tree import DecisionTreeClassifier, plot_tree
 from sklearn.preprocessing import LabelEncoder
 from sklearn.metrics import (
@@ -19,29 +18,43 @@ from sklearn.metrics import (
     precision_score,
     recall_score,
     f1_score,
-    confusion_matrix
+    confusion_matrix,
+    roc_curve,
+    auc,
+    precision_recall_curve
 )
 
 from synthetic_generator import generate_synthetic_data
 
-warnings.filterwarnings("ignore")
 
 # =============================================================================
-# CONFIG
+# CONFIGURATION
 # =============================================================================
 
 RANDOM_STATE = 42
 TEST_SIZE = 0.2
 VALIDATION_SIZE = 0.1
 
-MAX_DEPTH_RANGE = range(1, 15)
-CRITERION = "gini"
-
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 GRAPH_DIR = os.path.join(BASE_DIR, "graphs")
-MODEL_PATH = os.path.join(BASE_DIR, "decision_tree_model.pkl")
+MODEL_DIR = os.path.join(BASE_DIR, "models")
 
 os.makedirs(GRAPH_DIR, exist_ok=True)
+os.makedirs(MODEL_DIR, exist_ok=True)
+
+MODEL_PATH = os.path.join(MODEL_DIR, "decision_tree_model.pkl")
+
+
+# =============================================================================
+# LOGGING
+# =============================================================================
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s | %(levelname)s | %(message)s"
+)
+logger = logging.getLogger(__name__)
+
 
 # =============================================================================
 # METRICS
@@ -56,55 +69,117 @@ class ClassificationMetrics:
 
 
 # =============================================================================
-# PROCESSOR
+# PREPROCESSOR
 # =============================================================================
 
 class DatasetProcessor:
     def __init__(self):
-        self.encoders = {}
+        self.encoders: Dict[str, LabelEncoder] = {}
 
-    def fit_transform(self, X, y):
-        X_encoded = X.copy()
+    def fit_transform(self, x: pd.DataFrame, y: pd.Series):
+        x_encoded = x.copy()
 
-        for col in X.columns:
+        for col in x.columns:
             le = LabelEncoder()
-            X_encoded[col] = le.fit_transform(X[col])
+            x_encoded[col] = le.fit_transform(x[col])
             self.encoders[col] = le
 
-        y_le = LabelEncoder()
-        y_encoded = y_le.fit_transform(y)
-        self.encoders["target"] = y_le
+        target_encoder = LabelEncoder()
+        y_encoded = target_encoder.fit_transform(y)
+        self.encoders["target"] = target_encoder
 
-        return X_encoded, y_encoded
+        return x_encoded, y_encoded
 
 
 # =============================================================================
-# TUNER
+# MODEL TRAINER
 # =============================================================================
 
-class DecisionTreeTuner:
-    def tune_depth(self, X_train, y_train, X_val, y_val):
-        accuracies = []
+class DecisionTreeTrainer:
 
-        for depth in MAX_DEPTH_RANGE:
-            model = DecisionTreeClassifier(
-                max_depth=depth,
-                criterion=CRITERION,
-                random_state=RANDOM_STATE
-            )
-            model.fit(X_train, y_train)
-            acc = accuracy_score(y_val, model.predict(X_val))
-            accuracies.append(acc)
+    def __init__(self):
+        self.model = None
 
-        best_depth = list(MAX_DEPTH_RANGE)[np.argmax(accuracies)]
+    def tune_and_train(self, x_train, y_train):
+        param_grid = {
+            "max_depth": range(1, 15),
+            "criterion": ["gini", "entropy"]
+        }
 
-        plt.figure(figsize=(10, 6))
-        plt.plot(list(MAX_DEPTH_RANGE), accuracies, marker="o")
-        plt.title("Accuracy vs Max Depth")
-        plt.savefig(os.path.join(GRAPH_DIR, "accuracy_vs_depth.png"))
+        grid = GridSearchCV(
+            DecisionTreeClassifier(random_state=RANDOM_STATE),
+            param_grid,
+            cv=5,
+            scoring="accuracy"
+        )
+
+        grid.fit(x_train, y_train)
+
+        self.model = grid.best_estimator_
+
+        logger.info(f"Best Parameters: {grid.best_params_}")
+        return self.model
+
+
+# =============================================================================
+# EVALUATION
+# =============================================================================
+
+class Evaluator:
+
+    @staticmethod
+    def generate_all_graphs(model, x_test, y_test, feature_names):
+
+        prediction = model.predict(x_test)
+        probs = model.predict_proba(x_test)[:, 1]
+
+        # Confusion Matrix
+        cm = confusion_matrix(y_test, prediction)
+        plt.figure()
+        sns.heatmap(cm, annot=True, fmt="d",
+                    xticklabels=["No", "Yes"],
+                    yticklabels=["No", "Yes"])
+        plt.title("Confusion Matrix")
+        plt.savefig(os.path.join(GRAPH_DIR, "confusion_matrix.png"))
         plt.close()
 
-        return best_depth
+        # Feature Importance
+        plt.figure()
+        plt.bar(feature_names, model.feature_importances_)
+        plt.title("Feature Importance")
+        plt.savefig(os.path.join(GRAPH_DIR, "feature_importance.png"))
+        plt.close()
+
+        # ROC Curve
+        fpr, tpr, _ = roc_curve(y_test, probs)
+        roc_auc = auc(fpr, tpr)
+        plt.figure()
+        plt.plot(fpr, tpr, label=f"AUC = {roc_auc:.2f}")
+        plt.plot([0, 1], [0, 1])
+        plt.legend()
+        plt.title("ROC Curve")
+        plt.savefig(os.path.join(GRAPH_DIR, "roc_curve.png"))
+        plt.close()
+
+        # Precision Recall Curve
+        precision, recall, _ = precision_recall_curve(y_test, probs)
+        plt.figure()
+        plt.plot(recall, precision)
+        plt.title("Precision Recall Curve")
+        plt.savefig(os.path.join(GRAPH_DIR, "precision_recall_curve.png"))
+        plt.close()
+
+        # Tree Structure
+        plt.figure(figsize=(12, 6))
+        plot_tree(
+            model,
+            feature_names=feature_names,
+            class_names=["No", "Yes"],
+            filled=True
+        )
+        plt.title("Decision Tree Structure")
+        plt.savefig(os.path.join(GRAPH_DIR, "tree_structure.png"))
+        plt.close()
 
 
 # =============================================================================
@@ -112,64 +187,57 @@ class DecisionTreeTuner:
 # =============================================================================
 
 class MLPipeline:
+
     def run(self):
 
-        print("Generating synthetic tennis dataset...")
-
-        X, y = generate_synthetic_data(
-            n_samples=1000,
-            save=True
-        )
-
-        print("Synthetic dataset saved inside the data folder.")
-
+        logger.info("Generating synthetic dataset...")
+        x, y = generate_synthetic_data(n_samples=1000, save=True)
 
         processor = DatasetProcessor()
-        X, y = processor.fit_transform(X, y)
+        x, y = processor.fit_transform(x, y)
 
-        X_temp, X_test, y_temp, y_test = train_test_split(
-            X, y, test_size=TEST_SIZE,
-            stratify=y, random_state=RANDOM_STATE
-        )
-
-        val_ratio = VALIDATION_SIZE / (1 - TEST_SIZE)
-
-        X_train, X_val, y_train, y_val = train_test_split(
-            X_temp, y_temp,
-            test_size=val_ratio,
-            stratify=y_temp,
+        x_train, x_test, y_train, y_test = train_test_split(
+            x, y,
+            test_size=TEST_SIZE,
+            stratify=y,
             random_state=RANDOM_STATE
         )
 
-        tuner = DecisionTreeTuner()
-        best_depth = tuner.tune_depth(X_train, y_train, X_val, y_val)
+        trainer = DecisionTreeTrainer()
+        model = trainer.tune_and_train(x_train, y_train)
 
-        model = DecisionTreeClassifier(
-            max_depth=best_depth,
-            criterion=CRITERION,
-            random_state=RANDOM_STATE
-        )
-
-        model.fit(X_train, y_train)
-
-        preds = model.predict(X_test)
+        prediction = model.predict(x_test)
 
         metrics = ClassificationMetrics(
-            accuracy=accuracy_score(y_test, preds),
-            precision=precision_score(y_test, preds),
-            recall=recall_score(y_test, preds),
-            f1_score=f1_score(y_test, preds)
+            accuracy=accuracy_score(y_test, prediction),
+            precision=precision_score(y_test, prediction),
+            recall=recall_score(y_test, prediction),
+            f1_score=f1_score(y_test, prediction)
         )
 
-        print("\nBest Depth:", best_depth)
-        print("Accuracy :", round(metrics.accuracy, 4))
-        print("Precision:", round(metrics.precision, 4))
-        print("Recall   :", round(metrics.recall, 4))
-        print("F1 Score :", round(metrics.f1_score, 4))
+        logger.info(f"Accuracy: {metrics.accuracy:.4f}")
+        logger.info(f"Precision: {metrics.precision:.4f}")
+        logger.info(f"Recall: {metrics.recall:.4f}")
+        logger.info(f"F1 Score: {metrics.f1_score:.4f}")
 
-        joblib.dump(model, MODEL_PATH)
-        print(f"\nModel saved at: {MODEL_PATH}")
+        Evaluator.generate_all_graphs(
+            model,
+            x_test,
+            y_test,
+            x.columns
+        )
 
+        joblib.dump({
+            "model": model,
+            "encoders": processor.encoders
+        }, MODEL_PATH)
+
+        logger.info(f"Model saved at: {MODEL_PATH}")
+
+
+# =============================================================================
+# ENTRY POINT
+# =============================================================================
 
 def main():
     MLPipeline().run()
