@@ -31,19 +31,23 @@ student = {
     }
 }
 
-for student_key in student:
-    marks = student[student_key]['marks']
-    if marks >= 90:
-        student[student_key]['grade'] = 'A'
-    elif marks >= 80:
-        student[student_key]['grade'] = 'B'
-    elif marks >= 60:
-        student[student_key]['grade'] = 'C'
-    elif marks >= 40:
-        student[student_key]['grade'] = 'D'
-    else:
-        student[student_key]['grade'] = 'Fail'
+for student_id in student:
+    for key, value in student[student_id].items():
+        if key == 'marks':
+            marks = value
+            if  marks <= 100 and marks >= 90:
+                student[student_id]['grade'] = 'A'
+            elif marks < 90 and marks >= 80:
+                student[student_id]['grade'] = 'B'
+            elif marks < 80 and marks >= 60:
+                student[student_id]['grade'] = 'C'
+            elif marks < 60 and marks >= 40:
+                student[student_id]['grade'] = 'D'
+            else:
+                student[student_id]['grade'] = 'Fail'
 
-print("\nRecords of all students:")
-for key, value in student.items():
-    print(f"\n{key}: {value}")
+print("\nStudent Records:")
+for student_id, details in student.items():
+    print(f"\n{student_id}:")
+    for key, value in details.items():
+        print(f"  {key}: {value}")
